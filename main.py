@@ -1,59 +1,163 @@
 from machine import Pin, I2C
-import time
+import utime as time
 from umqtt.simple import MQTTClient
 import network
 import machine
 import ujson
+
 # construct an I2C bus
 i2c = I2C(scl=Pin(5), sda=Pin(4), freq=100000)
-# i2c.writeto_mem(64,0x02,conf0)
-# CLIENT_ID =  b"esp8266_" + ubinascii.hexlify(machine.unique_id())
-# broker = "192.168.0.10"
-# client = MQTTClient(CLIENT_ID,broker)
 
-    
+#Defining broker address, ssid and broker password
+#BROKER_ADDRESS= "192.168.0.10"   
+# SSID = 'EEERover'
+# PASSWORD = 'exhibition'
+BROKER_ADDRESS= "mqtt.thingspeak.com"
 SSID = 'Xperia Z3_62d1'
-PASSWORD = 'e2341fb5c0ca'
+PASSWORD = 'exhibition'
 
+#Connecting to the network
 sta_if = network.WLAN(network.STA_IF)
+
 ap_if = network.WLAN(network.AP_IF)
 ap_if.active(False)
 sta_if.active(True)
 sta_if.connect(SSID, PASSWORD)
 
+#Wait for network to connect before proceeding with execution of code.
 while not sta_if.isconnected():
   pass
-
+print("Connected to network")
+#Activating the real time clock and setting its first value.
 rtc = machine.RTC()
-rtc.datetime((2017, 2, 9, 4, 10, 40, 0, 0))
+rtc.datetime((2017, 2, 15, 10, 48, 0, 0, 0))
+
+#Defining thingspeak channel information and connect to it.
 thingspeakChannelId = "227308" 
 thingspeakChannelWriteapi = "D14PP8N2KQE082IJ"
-c = MQTTClient("ESP8266","mqtt.thingspeak.com", 1883)  
+c = MQTTClient("Dhruv",BROKER_ADDRESS, 1883)  
 c.connect()
-    
+
+temp_threshold= 32
+temp_burning= 280
+
+#Define a function to fill an array of 48 elements, each corresponding to half an hour slots, 
+#starting at midnight and ending at midnight of the next day.
+#If it is a time when you are supposed to be cooking, set the slot to 1. Otherwise set to 0.
+def set_array(array):
+	array[0] = 0
+	array[1] = 0
+	array[2] = 0
+	array[3] = 0
+	array[4] = 0
+	array[5] = 0
+	array[5] = 0
+	array[7] = 0
+	array[8] = 0
+	array[9] = 0
+	array[10] = 0
+	array[11] = 0
+	array[12] = 0
+	array[13] = 0
+	array[14] = 0
+	array[15] = 1
+	array[16] = 0
+	array[17] = 0
+	array[18] = 0
+	array[19] = 0
+	array[20] = 0
+	array[21] = 0
+	array[22] = 0
+	array[23] = 1
+	array[24] = 1
+	array[25] = 1
+	array[26] = 1
+	array[27] = 0
+	array[28] = 0
+	array[29] = 0
+	array[30] = 0
+	array[31] = 0
+	array[32] = 0
+	array[33] = 0
+	array[34] = 0
+	array[35] = 0
+	array[36] = 0
+	array[37] = 1
+	array[38] = 1
+	array[39] = 1
+	array[40] = 1
+	array[41] = 1
+	array[42] = 0
+	array[43] = 0
+	array[44] = 0
+	array[45] = 0
+	array[46] = 0
+	array[47] = 0
+
+#Declaring a an array of 48 bytearray and fill that array through the set_array function.
+time_array=bytearray(48)
+set_array(time_array)
 	
+#Formatting the data (temperature and time) in json.
 def output(TimeNow, cTemp):
 	out= ujson.dumps({'time':TimeNow,'temperature': cTemp})
 	return out
+
+#Infinite loop enetered after the initialisations.
 while True:
-	raw= i2c.readfrom_mem(64,0x03,2)
-	cTemp = (raw[0]*256+raw[1])/ 4
 	
+	#Reading temperature data from the object register on the sensor.
+	raw= i2c.readfrom_mem(64,0x03,2)
+	
+	#Converting the temperature data in Celsius.
+	cTemp = (raw[0]*256+raw[1])/ 4
 	if cTemp > 8191 :
 		cTemp -= 16384
 	cTemp = cTemp * 0.03125
-	print ("Object Temperature in Celsius : %.2f C" %cTemp)
 	
-	
+	#Reading temperature data from the die register on the sensor.
 	raw1= i2c.readfrom_mem(64,0x01,2)
-	cTemp1 = (raw1[0]*256 + raw1[1])/4	
-	TimeNow = rtc.datetime()
-	
+	cTemp1 = (raw1[0]*256 + raw1[1])/4
 	if cTemp1 > 8191 :
 		cTemp1 -= 16384
 	cTemp1 = cTemp1 * 0.03125
-	print ("Sensor Temperature in Celsius : %.2f C" %cTemp1)
-	credentials = "channels/{:s}/publish/{:s}".format(thingspeakChannelId, thingspeakChannelWriteapi)  
-	payload = "field1={:.1f}\n".format(cTemp1)
-	c.publish(credentials, payload)
+	
+	
+	#Returning seconds since clock was initialised as an integer.
+	now=time.time()
+	#Taking the seconds as input and formatting it into complete date and time format: 
+	#[year month day hour minute second weekday yearday]
+	#NOTE: last two variables set to 0.
+	tm=time.localtime(now)
+	
+	#If 30 minutes have passed, flag is set to 1, else stays at 0.
+	if tm[4]>30:
+		thirty_mins_flag=1 
+		
+	else :
+		thirty_mins_flag=0 
+		
+	#Counter to keep track of how many 30 mins slots have passed:
+	#multiply hours passed by two and add the flag for the latest 30 mins passed.
+	thirty_min_segment=(tm[3]*2)+thirty_mins_flag
+	
+	#Retrieving the value of the time_array index corresponding to the current 30 mins slot and storing it in a flag for cooking.
+	cooking_flag=time_array[thirty_min_segment]
+	
+	#If you are not supposed to be cooking but the temperature sensed is above a threshold, publish an alert.
+	if cooking_flag==0 and cTemp>temp_threshold :
+		#c.publish(b'esys\FIDES\temp',str(output(now,cTemp
+		
+		#Publishing to ThingSpeak.
+		credentials = "channels/{:s}/publish/{:s}".format(thingspeakChannelId, thingspeakChannelWriteapi)  
+		payload = "field1={:}&field3=1\n".format(output(now, cTemp))
+		c.publish(credentials, payload)
+		print(str(output(tm,cTemp)))
+		
+	#If you are supposed to be cooking but the temperature sensed is above a safe temperature, publish an alert.
+	elif cTemp > temp_burning :
+		dummyvariablet=1
+		
 	time.sleep(5)
+
+	
